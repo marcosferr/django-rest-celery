@@ -1,0 +1,42 @@
+version: '3.1'
+
+services:
+  db:
+    image: postgres
+    restart: always
+    environment:
+      POSTGRES_PASSWORD: 12345678
+      POSTGRES_USER: masteruser
+      POSTGRES_DB: postgres
+    ports:
+      - 5432:5432
+  redis:
+    image: redis
+    ports:
+      - 6379:6379
+  django-rest:
+    build: ./django-rest-framework
+    command: python manage.py runserver 0.0.0.0:5000
+    volumes:
+      - ./django-rest-framework:/code
+    ports:
+      - 5000:5000
+    depends_on:
+      - db
+  django:
+    build: ./celery-async-tasks
+    command: python manage.py runserver 0.0.0.0:8000
+    volumes:
+      - ./celery-async-tasks:/code
+    ports:
+      - 8000:8000
+    depends_on:
+      - redis
+
+  celery:
+    build: ./celery-async-tasks
+    command: celery -A django_celery worker -l info
+    volumes:
+      - ./celery-async-tasks:/code
+    depends_on:
+      - django
