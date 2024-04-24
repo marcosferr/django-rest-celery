@@ -1,3 +1,4 @@
+import io
 import pandas as pd    
 import numpy as np
 import math
@@ -10,6 +11,19 @@ register_adapter(np.int64, AsIs)
 register_adapter(np.float64, AsIs)
 register_adapter(np.datetime64, AsIs)
 
+def clean_comma_in_strings(df):
+    """ Cleans commas within strings in a pandas dataframe
+
+    Args:
+        df: The pandas dataframe to clean
+
+    Returns:
+        A new pandas dataframe with commas within strings cleaned
+    """
+    for col in df.columns:
+        if df[col].dtype == object:  # Use 'object' instead of 'np.object'
+            df[col] = df[col].apply(lambda x: x.replace(",", "") if isinstance(x, str) else x)
+    return df
 
 def to_int(x):
     if x == ' ' or (isinstance(x, float) and math.isnan(x)):
@@ -29,38 +43,37 @@ def close_db_connection(conn, cur):
     conn.close()
     print("Connection to PostgreSQL database closed.")
 
-
-
 def get_month(x):
     return str(x.month) + '-' + str(x.year)
+
 def drop_registros_table(cur):
     """ Drops the 'registros' table from the PostgreSQL database. """
     drop_query = "DROP TABLE IF EXISTS registros;"
     cur.execute(drop_query)
     print("Table 'registros' dropped successfully.")
+
 def create_registros_table(cur):
     """ Creates the 'registros' table in the PostgreSQL database. """
     # Drop the 'registros' table if it exists
     drop_registros_table(cur)
 
     table_definition = """
-        CREATE TABLE registros (
-            numero_factura varchar(255),
-            pais VARCHAR(255),
-            precio_unitario FLOAT,
+        CREATE TABLE IF NOT EXISTS registros (
+            numero_factura VARCHAR(255),
             codigo VARCHAR(255),
             descripcion TEXT,
             cantidad INT,
             fecha_factura DATE,
-            mes VARCHAR(255),
-            id_cliente INT
+            precio_unitario FLOAT,
+            id_cliente INT,
+            pais VARCHAR(255),
+            mes VARCHAR(255)
         );
     """
 
 
     cur.execute(table_definition)
     print("Table 'registros' created successfully.")
-
 
 def process_data(filename, db_params):
     """Reads a CSV file, renames columns, converts data types, creates a 'mes' column, and saves to a PostgreSQL database."""
@@ -78,6 +91,7 @@ def process_data(filename, db_params):
                              'InvoiceDate': 'fecha_factura',
                              'CustomerID': 'id_cliente'})
 
+    df = clean_comma_in_strings(df.copy())
     df['id_cliente'] = df['id_cliente'].apply(to_int)
 
     df['fecha_factura'] = pd.to_datetime(df['fecha_factura']).dt.date
@@ -93,15 +107,14 @@ def process_data(filename, db_params):
     create_registros_table(cur)
 
 
-    # Create a parameterized INSERT query
-    insert_query = """
-        INSERT INTO registros (numero_factura, codigo, descripcion, cantidad, fecha_factura, precio_unitario, id_cliente, pais, mes)
-        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
-    """
+    # Prepare data for insertion
+    data = df.to_csv(index=False, header=False)
+    data_io = io.StringIO(data)
 
-
-    # Execute the INSERT query for each row in the DataFrame using executemany
-    cur.executemany(insert_query, df.to_records(index=False))
+    print(df.columns)
+    
+    # Use copy_from to insert data
+    cur.copy_from(data_io, 'registros', columns=df.columns, sep=',')
 
     close_db_connection(conn,cur)
     end_time = time.perf_counter()
